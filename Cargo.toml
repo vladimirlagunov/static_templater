@@ -1,0 +1,10 @@
+[package]
+
+name = "static_templater"
+version = "0.0.1"
+authors = ["lvo"]
+# build = "build.rs"
+
+
+[build-dependencies.peg]
+git = "https://github.com/kevinmehall/rust-peg"

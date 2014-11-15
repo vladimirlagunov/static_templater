@@ -1,0 +1,28 @@
+use translate::*;
+
+#[pub]
+template_parser -> Vec<Box<Expr>>
+    = element*
+
+
+element -> Box<Expr>
+    = rust_code / text
+
+
+text -> Box<Expr>
+    = (!code_start .)+ { box ExprText(match_str.into_string()) }
+
+
+rust_code -> Box<Expr>
+    = code_start code:until_code_end code_end { code }
+
+      until_code_end -> Box<Expr>
+          = (!code_end .)* { box ExprRustCode(match_str.into_string()) }
+
+
+code_start
+    = "<rust-code>"
+
+
+code_end
+    = "</rust-code>"
