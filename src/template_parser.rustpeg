@@ -1,28 +1,48 @@
-use translate::*;
+use template_ast::{TemplateAST, TemplateExpr};
 
 #[pub]
-template_parser -> Vec<Box<Expr>>
-    = element*
+template_parser -> TemplateAST
+    = e:element*
+{
+    TemplateAST{children: e}
+}
 
 
-element -> Box<Expr>
-    = rust_code / text
+element -> TemplateExpr
+    = show_variable
+    / text
 
 
-text -> Box<Expr>
-    = (!code_start .)+ { box ExprText(match_str.into_string()) }
+show_variable -> TemplateExpr
+    = show_variable_start
+      " "*
+      var_name:identifier
+      var_fmt:_show_variable_fmt?
+      " "*
+      show_variable_end
+{
+    TemplateExpr::ShowVariable(
+        var_name,
+        var_fmt
+    )
+}
+
+_show_variable_fmt -> String
+    = ":" (!show_variable_end .)*
+{
+    match_str.slice_from(1).trim_right_chars(' ').into_string()
+}
+
+text -> TemplateExpr
+    = (!show_variable_start !command_start .)+
+    { TemplateExpr::Text(match_str.into_string()) }
 
 
-rust_code -> Box<Expr>
-    = code_start code:until_code_end code_end { code }
+show_variable_start = "{{"
+show_variable_end = "}}"
+command_start = "{%"
+command_end = "%}"
 
-      until_code_end -> Box<Expr>
-          = (!code_end .)* { box ExprRustCode(match_str.into_string()) }
-
-
-code_start
-    = "<rust-code>"
-
-
-code_end
-    = "</rust-code>"
+identifier -> String
+    = [A-Za-z_][A-Za-z0-9_]*
+    { match_str.into_string() }
