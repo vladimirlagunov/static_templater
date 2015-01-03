@@ -1,3 +1,4 @@
+# -*- conf -*-
 [package]
 
 name = "static_templater"
@@ -6,6 +7,13 @@ authors = ["lvo"]
 # build = "build.rs"
 
 
+[lib]
+name = "static_templater"
+path = "src/lib.rs"
+test = true
+plugin = true
+crate-type = ["dylib"]
+
+
 [build-dependencies.peg]
-# git = "https://github.com/kevinmehall/rust-peg"
-path = "../rust-peg"
+git = "https://github.com/kevinmehall/rust-peg"
