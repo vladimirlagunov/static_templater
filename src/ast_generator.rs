@@ -4,8 +4,8 @@ use std::io::fs::File;
 use std::borrow::ToOwned;
 
 use syntax::ast;
-use syntax::codemap::Span;
-use syntax::ext::base;
+use syntax::codemap::{Span, Spanned};
+use syntax::ext::{base, expand};
 use syntax::ext::build::AstBuilder;
 use syntax::owned_slice::OwnedSlice;
 use syntax::parse::token;
@@ -131,6 +131,23 @@ fn make_templater_ast<'cx>(
         },
         args_generics.clone()));
 
+    let mut fn_block_statements = vec![ecx.stmt_let_typed(
+        sp,
+        true,  // mutable
+        ecx.ident_of("result"),
+        ecx.ty_ident(sp, ecx.ident_of("String")),
+        ecx.expr_call(
+            sp,
+            ecx.expr_path(ecx.path(sp, vec![ecx.ident_of("String"), ecx.ident_of("new")])),
+            vec![]))];
+    fn_block_statements.extend(_make_fn_block_statements(ecx, sp, &template_tree).into_iter());
+
+    let fn_block = ecx.block(sp, fn_block_statements, Some(ecx.expr_ident(sp, ecx.ident_of("result"))));
+    // let fn_block = {
+    //     let mut macro_expander = expand::MacroExpander::new(ecx);
+    //     expand::expand_block(fn_block, &mut macro_expander)
+    // };
+
     items.push(ecx.item_fn_poly(
         sp,
         ecx.ident_of("render"),
@@ -148,19 +165,7 @@ fn make_templater_ast<'cx>(
                 )))],
         ecx.ty_path(ecx.path_ident(sp, ecx.ident_of("String"))),
         args_generics,
-        ecx.block(
-            sp,
-            vec![ecx.stmt_let_typed(
-                sp,
-                true,  // mutable
-                ecx.ident_of("result"),
-                ecx.ty_ident(sp, ecx.ident_of("String")),
-                ecx.expr_call(
-                    sp,
-                    ecx.expr_path(ecx.path(sp, vec![ecx.ident_of("String"), ecx.ident_of("new")])),
-                    vec![]))],
-            Some(ecx.expr_ident(sp, ecx.ident_of("result")),
-        ))));
+        fn_block));
 
     Ok(items)
 }
@@ -184,4 +189,66 @@ fn _get_template_variables(tree: &TemplateAST) -> Vec<String> {
     result.as_mut_slice().sort();
     result.shrink_to_fit();
     result
+}
+
+
+#[inline]
+fn _make_fn_block_statements<'cx>(ecx: &'cx mut base::ExtCtxt, sp: Span, tree: &TemplateAST) -> Vec<P<ast::Stmt>> {
+    let mut result: Vec<P<ast::Expr>> = Vec::new();
+
+    {
+        let push_str_item = |item| ecx.expr_method_call(
+            sp,
+            ecx.expr_ident(sp, ecx.ident_of("result")),
+            ecx.ident_of("push_str"),
+            vec![item]);
+
+        let cooked_str = |s: String| ecx.expr_lit(
+            sp, ast::LitStr(
+                token::intern_and_get_ident(s.as_slice()),
+                ast::CookedStr));
+
+        for item in tree.children.iter() {
+            match item {
+                &TemplateExpr::Text(ref text) => {
+                    result.push(push_str_item(cooked_str(text.clone())));
+                },
+                &TemplateExpr::ShowVariable(ref varname, ref fmt) => {
+                    let fmt = match *fmt {
+                        Some(ref x) => format!("{{:{}}}", x),
+                        None => "{}".to_string(),
+                    };
+                    result.push(push_str_item(
+                        ecx.expr_method_call(
+                            sp, ecx.expr(
+                                sp, ast::ExprMac(Spanned {
+                                    span: sp, node: ast::MacInvocTT(
+                                        ecx.path_ident(sp, ecx.ident_of("format")),
+                                        vec![
+                                            ast::TtToken(sp, token::Literal(
+                                                token::Str_(ecx.name_of(fmt.as_slice())),
+                                                None)),
+                                            ast::TtToken(sp, token::Comma),
+                                            ast::TtToken(sp, token::Interpolated(
+                                                token::NtExpr(ecx.expr_field_access(
+                                                    sp, ecx.expr_ident(sp, ecx.ident_of("args")),
+                                                    ecx.ident_of(varname.as_slice()))))),
+                                            ],
+                                        0)})),
+                            // ecx.expr_call_ident(
+                            //     sp, ecx.ident_of("format!"), vec![
+                            //         cooked_str(fmt),
+                            //         ecx.expr_field_access(
+                            //             sp, ecx.expr_ident(
+                            //                 sp, ecx.ident_of("args")),
+                            //             ecx.ident_of(varname.as_slice())),
+                            //         ]),
+                            ecx.ident_of("as_slice"),
+                            vec![])));
+                },
+            }
+        }
+    }
+
+    result.into_iter().map(|expr| ecx.stmt_expr(expr)).collect()
 }
