@@ -67,7 +67,10 @@ pub fn plugin_registrar(reg: &mut Registry) {
         token::intern("print_ast"),
         Modifier(box print_ast_item_modifier));
 
-    reg.register_macro("templater_from_file", ast_generator::templater_from_file);
+    // reg.register_macro("templater_from_file", ast_generator::templater_from_file);
+    reg.register_syntax_extension(
+        token::intern("templater_from_file"),
+        Modifier(box ast_generator::make_templater_module_from_file));
 }
 
 

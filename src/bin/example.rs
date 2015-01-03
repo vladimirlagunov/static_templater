@@ -7,7 +7,9 @@
 // use static_templater::make_template;
 
 
-templater_from_file!(test_generator, "data/test.rs.html");
+// templater_from_file!(test_generator, "data/test.rs.html");
+
+#[templater_from_file] mod example_templater {}
 
 
 fn main() {
