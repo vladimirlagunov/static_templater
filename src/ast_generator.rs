@@ -2,11 +2,11 @@ use std::collections::{HashSet, HashMap};
 use std::collections::hash_map::Entry;
 use std::path::Path;
 use std::io::fs::File;
-use std::borrow::ToOwned;
+use std::os;
 
 use syntax::{ast, abi};
 use syntax::codemap::{Span, Spanned};
-use syntax::ext::{base, expand};
+use syntax::ext::base;
 use syntax::ext::build::AstBuilder;
 use syntax::owned_slice::OwnedSlice;
 use syntax::parse::token;
@@ -19,12 +19,10 @@ use self::template_parser::template_parser;
 peg_file! template_parser("template_parser.rustpeg");
 
 
-static template_from_file_usage: &'static str = "Usage: #[template_from_file(path=\"path/to/file.html\")] mod fgsfds {}";
+static TEMPLATE_FROM_FILE_USAGE: &'static str = "Usage: #[template_from_file(path=\"path/to/file.html\")] mod fgsfds {}";
 
 pub fn make_templater_module_from_file(ecx: &mut base::ExtCtxt, sp: Span, meta_item: &ast::MetaItem, item: P<ast::Item>) -> P<ast::Item> {
     use syntax::print::pprust;
-
-    println!("******** MetaItem = {}", meta_item);
 
     let file_relative_path: String = {
         let mut file_relative_path = None;
@@ -38,20 +36,20 @@ pub fn make_templater_module_from_file(ecx: &mut base::ExtCtxt, sp: Span, meta_i
                             file_relative_path = Some(interned_value.get())
                         },
                         _ => {
-                            ecx.span_err(sp, template_from_file_usage);
+                            ecx.span_err(sp, TEMPLATE_FROM_FILE_USAGE);
                             return item;
                         },
                     }
                 }
             },
             _ => {
-                ecx.span_err(sp, template_from_file_usage);
+                ecx.span_err(sp, TEMPLATE_FROM_FILE_USAGE);
                 return item;
             },
         }
 
         if file_relative_path.is_none() {
-            ecx.span_err(sp, template_from_file_usage);
+            ecx.span_err(sp, TEMPLATE_FROM_FILE_USAGE);
             return item;
         }
 
@@ -88,8 +86,12 @@ pub fn make_templater_module_from_file(ecx: &mut base::ExtCtxt, sp: Span, meta_i
                         vis: item.vis.clone(),
                         span: item.span.clone(),
                     };
-                    println!("*** START OF SERIALIZED CODE ****\n{}\n*** END OF SERIALIZED CODE ****",
-                             pprust::item_to_string(&result_item));
+
+                    if !os::getenv("STATIC_TEMPLATER_DEBUG").is_none() {
+                        ecx.parse_sess.span_diagnostic.span_help(
+                            sp, pprust::item_to_string(&result_item).as_slice());
+                    }
+
                     P(result_item)
                 },
                 Err((sp, msg)) => {
