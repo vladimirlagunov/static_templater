@@ -1,9 +1,10 @@
-use std::collections::HashSet;
+use std::collections::{HashSet, HashMap};
+use std::collections::hash_map::Entry;
 use std::path::Path;
 use std::io::fs::File;
 use std::borrow::ToOwned;
 
-use syntax::ast;
+use syntax::{ast, abi};
 use syntax::codemap::{Span, Spanned};
 use syntax::ext::{base, expand};
 use syntax::ext::build::AstBuilder;
@@ -18,12 +19,44 @@ use self::template_parser::template_parser;
 peg_file! template_parser("template_parser.rustpeg");
 
 
+static template_from_file_usage: &'static str = "Usage: #[template_from_file(path=\"path/to/file.html\")] mod fgsfds {}";
+
 pub fn make_templater_module_from_file(ecx: &mut base::ExtCtxt, sp: Span, meta_item: &ast::MetaItem, item: P<ast::Item>) -> P<ast::Item> {
     use syntax::print::pprust;
 
     println!("******** MetaItem = {}", meta_item);
 
-    let file_relative_path: String = String::from_str("data/test.rs.html");
+    let file_relative_path: String = {
+        let mut file_relative_path = None;
+        match meta_item.node {
+            ast::MetaList(_, ref param_vec) => {
+                for param in param_vec.iter() {
+                    match param.node {
+                        ast::MetaNameValue(ref name, Spanned{node: ast::LitStr(ref interned_value, _), ..})
+                            if name.get() == "path" =>
+                        {
+                            file_relative_path = Some(interned_value.get())
+                        },
+                        _ => {
+                            ecx.span_err(sp, template_from_file_usage);
+                            return item;
+                        },
+                    }
+                }
+            },
+            _ => {
+                ecx.span_err(sp, template_from_file_usage);
+                return item;
+            },
+        }
+
+        if file_relative_path.is_none() {
+            ecx.span_err(sp, template_from_file_usage);
+            return item;
+        }
+
+        file_relative_path.unwrap().to_string()
+    };
 
     let source = File::open(&Path::new(file_relative_path.clone())).and_then(
         |mut f| f.read_to_string());
@@ -43,6 +76,10 @@ pub fn make_templater_module_from_file(ecx: &mut base::ExtCtxt, sp: Span, meta_i
                 Ok(new_items) => {
                     let mut module = module.clone();
                     module.items.extend(new_items.into_iter());
+                    module.view_items.push(
+                        ecx.view_use_simple(sp, ast::Inherited, ecx.path_ident(
+                            sp, ecx.ident_of("std"))));
+
                     let result_item = ast::Item {
                         ident: item.ident.clone(),
                         attrs: item.attrs.clone(),
@@ -83,53 +120,49 @@ fn make_templater_ast<'cx>(
         }
     };
 
-    let template_variables = _get_template_variables(&template_tree);
-    let template_variable_types: Vec<String> = template_variables.iter().map(
-        |ref varname| {
-            let mut s = to_camel_case(varname);
-            s.push_str("Type");
-            s
-        }).collect();
+    let template_variables = _get_template_variables(ecx, &template_tree);
+    let mut items = Vec::<P<ast::Item>>::new();
 
     let args_generics = ast::Generics {
         lifetimes: vec![],
-        ty_params: OwnedSlice::from_vec(template_variable_types.iter().map(
-            |name| ast::TyParam {
-                ident: ecx.ident_of(name.as_slice()),
-                id: ast::DUMMY_NODE_ID,
-                bounds: OwnedSlice::empty(),
-                unbound: None,
-                default: None,
-                span: sp,
-            }).collect()),
+        ty_params: OwnedSlice::from_vec(template_variables.iter().map(|var| ast::TyParam {
+            ident: var.type_,
+            id: ast::DUMMY_NODE_ID,
+            bounds: OwnedSlice::from_vec(var.traits.iter().map(
+                |x| ecx.typarambound(ecx.path(sp, x.clone()))).collect()),
+            unbound: None,
+            default: None,
+            span: sp,
+        }).collect()),
         where_clause: ast::WhereClause {
             id: ast::DUMMY_NODE_ID,
             predicates: vec![],
-        }
+        },
     };
 
-    let mut items = Vec::<P<ast::Item>>::new();
-
-    items.push(ecx.item_struct_poly(
-        sp,
-        ecx.ident_of("Args"),
-        ast::StructDef {
-            fields: template_variables.iter().zip(
-                template_variable_types.iter()).map(
-                |(varname, vartype)| ast::StructField {
+    items.push(P(ast::Item {
+        ident: ecx.ident_of("Args"),
+        span: sp,
+        vis: ast::Public,
+        id: ast::DUMMY_NODE_ID,
+        attrs: Vec::new(),
+        node: ast::ItemStruct(
+            P(ast::StructDef {
+                fields: template_variables.iter().map(|var| ast::StructField {
                     span: sp,
                     node: ast::StructField_ {
                         id: ast::DUMMY_NODE_ID,
-                        kind: ast::NamedField(ecx.ident_of(varname.as_slice()), ast::Public),
+                        kind: ast::NamedField(var.name, ast::Public),
                         ty: ecx.ty(sp, ast::TyPath(
-                            ecx.path(sp, vec![ecx.ident_of(vartype.as_slice())]),
+                            ecx.path_ident(sp, var.type_),
                             ast::DUMMY_NODE_ID)),
                         attrs: vec![],
                     },
                 }).collect(),
-            ctor_id: None,
-        },
-        args_generics.clone()));
+                ctor_id: None,
+            }),
+            args_generics.clone()),
+    }));
 
     let mut fn_block_statements = vec![ecx.stmt_let_typed(
         sp,
@@ -143,52 +176,88 @@ fn make_templater_ast<'cx>(
     fn_block_statements.extend(_make_fn_block_statements(ecx, sp, &template_tree).into_iter());
 
     let fn_block = ecx.block(sp, fn_block_statements, Some(ecx.expr_ident(sp, ecx.ident_of("result"))));
-    // let fn_block = {
-    //     let mut macro_expander = expand::MacroExpander::new(ecx);
-    //     expand::expand_block(fn_block, &mut macro_expander)
-    // };
 
-    items.push(ecx.item_fn_poly(
-        sp,
-        ecx.ident_of("render"),
-        vec![ecx.arg(
-            sp,
-            ecx.ident_of("args"),
-            ecx.ty_path(ecx.path_all(
-                sp,
-                false,  // global
-                vec![ecx.ident_of("self"), ecx.ident_of("Args")],
-                vec![],  // lifetimes
-                template_variable_types.iter().map(
-                    |name| ecx.ty_ident(sp, ecx.ident_of(name.as_slice()))).collect(),
-                vec![],
-                )))],
-        ecx.ty_path(ecx.path_ident(sp, ecx.ident_of("String"))),
-        args_generics,
-        fn_block));
+    items.push(P(ast::Item {
+        span: sp,
+        ident: ecx.ident_of("render"),
+        attrs: Vec::new(),
+        vis: ast::Public,
+        id: ast::DUMMY_NODE_ID,
+        node: ast::ItemFn(
+            P(ast::FnDecl {
+                inputs: vec![ecx.arg(
+                    sp,
+                    ecx.ident_of("args"),
+                    ecx.ty_path(ecx.path_all(
+                        sp,
+                        false,  // global
+                        vec![ecx.ident_of("self"), ecx.ident_of("Args")],
+                        vec![],  // lifetimes
+                        template_variables.iter().map(
+                            |var| ecx.ty_ident(sp, var.type_)).collect(),
+                        vec![],
+                        )))],
+                output: ast::Return(ecx.ty_path(ecx.path_ident(sp, ecx.ident_of("String")))),
+                variadic: false,
+            }),
+            ast::Unsafety::Normal,
+            abi::Abi::Rust,
+            args_generics,
+            fn_block)
+    }));
 
     Ok(items)
 }
 
 
+struct TemplateVariable {
+    name: ast::Ident,
+    type_: ast::Ident,
+    traits: Vec<Vec<ast::Ident>>,
+}
+
+
 #[inline]
-fn _get_template_variables(tree: &TemplateAST) -> Vec<String> {
-    let mut variables = HashSet::<&str>::new();
+fn _get_template_variables<'cx>(ecx: &'cx mut base::ExtCtxt, tree: &TemplateAST) -> Vec<TemplateVariable> {
+    let mut variables = HashMap::<&str, HashSet<Vec<&str>>>::new();
 
     for expr in tree.children.iter() {
         match expr {
-            &TemplateExpr::ShowVariable(ref var, _) => {
-                variables.insert(var.as_slice());
+            &TemplateExpr::ShowVariable(ref var, ref fmt) => {
+                let mut traits = match variables.entry(var.as_slice()) {
+                    Entry::Occupied(v) => v.into_mut(),
+                    Entry::Vacant(v) => v.set(HashSet::new()),
+                };
+                traits.insert(vec!["Sized"]);
+                traits.insert(vec!["std", "fmt", match fmt {
+                    &Some(ref fmt) if fmt.len() > 0 => match fmt.char_at(fmt.len() - 1) {
+                        'o' => "Octal",
+                        'x' => "LowerHex",
+                        'X' => "UpperHex",
+                        'p' => "Pointer",
+                        'b' => "Binary",
+                        'e' => "LowerExp",
+                        'E' => "UpperExp",
+                        _ => "Show",
+                    },
+                    _ => "Show",
+                }]);
             },
             _ => {},
         }
     }
 
-    let mut result: Vec<String> = variables.into_iter().map(
-        |s| s.to_owned()).collect();
-    result.as_mut_slice().sort();
-    result.shrink_to_fit();
-    result
+    variables.into_iter().map(|(varname, vartraits)| TemplateVariable {
+        name: ecx.ident_of(varname),
+        type_: ecx.ident_of({
+            let mut s = to_camel_case(varname);
+            s.push_str("Type");
+            s
+        }.as_slice()),
+        traits: vartraits.into_iter().map(
+            |pathvec| pathvec.into_iter().map(
+                |path| ecx.ident_of(path)).collect()).collect(),
+    }).collect()
 }
 
 
@@ -235,14 +304,6 @@ fn _make_fn_block_statements<'cx>(ecx: &'cx mut base::ExtCtxt, sp: Span, tree: &
                                                     ecx.ident_of(varname.as_slice()))))),
                                             ],
                                         0)})),
-                            // ecx.expr_call_ident(
-                            //     sp, ecx.ident_of("format!"), vec![
-                            //         cooked_str(fmt),
-                            //         ecx.expr_field_access(
-                            //             sp, ecx.expr_ident(
-                            //                 sp, ecx.ident_of("args")),
-                            //             ecx.ident_of(varname.as_slice())),
-                            //         ]),
                             ecx.ident_of("as_slice"),
                             vec![])));
                 },

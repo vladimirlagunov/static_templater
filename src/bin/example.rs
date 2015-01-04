@@ -4,17 +4,18 @@
 #[phase(link, plugin)] extern crate peg_syntax_ext;
 #[phase(link, plugin)] extern crate static_templater;
 
-// use static_templater::make_template;
-
-
-// templater_from_file!(test_generator, "data/test.rs.html");
-
-#[templater_from_file] mod example_templater {}
+#[templater_from_file(path="data/test.rs.html")] mod example_templater {}
 
 
 fn main() {
-    // println!("{}", test_generator());
-    // for argument in os::args().iter().skip(1) {
-    //     make_template(argument.as_slice()).unwrap();
-    // }
+    use std::os;
+
+    let username = match os::args().as_slice() {
+        [_, ref username] => username.clone(),
+        _ => "%username%".to_string(),
+    };
+
+    print!("{}", example_templater::render(example_templater::Args {
+        user: username
+    }));
 }
