@@ -7,6 +7,7 @@
 #[phase(link, plugin)] extern crate log;
 #[phase(link, plugin)] extern crate peg_syntax_ext;
 #[phase(link, plugin)] extern crate syntax;
+#[phase(link, plugin)] extern crate serialize;
 extern crate rustc;
 
 use syntax::ast::{MetaItem, Item};

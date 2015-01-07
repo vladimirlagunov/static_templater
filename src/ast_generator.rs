@@ -12,7 +12,7 @@ use syntax::owned_slice::OwnedSlice;
 use syntax::parse::token;
 use syntax::ptr::P;
 
-use super::template_ast::{TemplateAST, TemplateExpr};
+use super::template_ast::{TemplateAST, TemplateExpr, RustExpr, RustExprValue};
 use super::utils::to_camel_case;
 
 use self::template_parser::template_parser;
@@ -220,46 +220,46 @@ struct TemplateVariable {
 
 
 #[inline]
-fn _get_template_variables<'cx>(ecx: &'cx mut base::ExtCtxt, tree: &TemplateAST) -> Vec<TemplateVariable> {
-    let mut variables = HashMap::<&str, HashSet<Vec<&str>>>::new();
+fn _get_template_variables<'cx, 'tree>(ecx: &'cx mut base::ExtCtxt, tree: &'tree TemplateAST) -> Vec<TemplateVariable> {
+    let mut variables = HashMap::<&'tree str, HashSet<Vec<&'tree str>>>::new();
+    {
+        let add_trait = |varname: &'tree str, vartrait: Vec<&'tree str>| {
+            let mut traits = match variables.entry(varname) {
+                Entry::Occupied(v) => v.into_mut(),
+                Entry::Vacant(v) => v.set(HashSet::new()),
+            };
+            traits.insert(vartrait);
+        };
 
-    for expr in tree.children.iter() {
-        match expr {
-            &TemplateExpr::ShowVariable(ref var, ref fmt) => {
-                let mut traits = match variables.entry(var.as_slice()) {
-                    Entry::Occupied(v) => v.into_mut(),
-                    Entry::Vacant(v) => v.set(HashSet::new()),
-                };
-                traits.insert(vec!["Sized"]);
-                traits.insert(vec!["std", "fmt", match fmt {
-                    &Some(ref fmt) if fmt.len() > 0 => match fmt.char_at(fmt.len() - 1) {
-                        'o' => "Octal",
-                        'x' => "LowerHex",
-                        'X' => "UpperHex",
-                        'p' => "Pointer",
-                        'b' => "Binary",
-                        'e' => "LowerExp",
-                        'E' => "UpperExp",
-                        _ => "Show",
-                    },
-                    _ => "Show",
-                }]);
-            },
-            _ => {},
+        for expr in tree.children.iter() {
+            match expr {
+                &TemplateExpr::Show(RustExpr::Value(
+                    RustExprValue::Ident(ref ident))) =>
+                {
+                    add_trait(ident.as_slice(),
+                              vec!["std", "string", "ToString"]);
+                },
+                &TemplateExpr::Text(_) => {},
+                e => {
+                    panic!("{} does not implemented yet", e);
+                },
+            }
         }
     }
 
-    variables.into_iter().map(|(varname, vartraits)| TemplateVariable {
-        name: ecx.ident_of(varname),
-        type_: ecx.ident_of({
-            let mut s = to_camel_case(varname);
-            s.push_str("Type");
-            s
-        }.as_slice()),
-        traits: vartraits.into_iter().map(
-            |pathvec| pathvec.into_iter().map(
-                |path| ecx.ident_of(path)).collect()).collect(),
-    }).collect()
+    variables.iter().map(
+        |(varname, vartraits): (&&'tree str, &HashSet<Vec<&'tree str>>)|
+        TemplateVariable {
+            name: ecx.ident_of(*varname),
+            type_: ecx.ident_of({
+                let mut s = to_camel_case(*varname);
+                s.push_str("Type");
+                s
+            }.as_slice()),
+            traits: vartraits.iter().map(
+                |pathvec| pathvec.iter().map(
+                    |path| ecx.ident_of(*path)).collect()).collect(),
+        }).collect()
 }
 
 
@@ -284,34 +284,41 @@ fn _make_fn_block_statements<'cx>(ecx: &'cx mut base::ExtCtxt, sp: Span, tree: &
                 &TemplateExpr::Text(ref text) => {
                     result.push(push_str_item(cooked_str(text.clone())));
                 },
-                &TemplateExpr::ShowVariable(ref varname, ref fmt) => {
-                    let fmt = match *fmt {
-                        Some(ref x) => format!("{{:{}}}", x),
-                        None => "{}".to_string(),
-                    };
+                &TemplateExpr::Show(ref expr) => {
+                    let value_expr = _convert_rust_expr_to_ast(ecx, sp, expr);
                     result.push(push_str_item(
                         ecx.expr_method_call(
-                            sp, ecx.expr(
-                                sp, ast::ExprMac(Spanned {
-                                    span: sp, node: ast::MacInvocTT(
-                                        ecx.path_ident(sp, ecx.ident_of("format")),
-                                        vec![
-                                            ast::TtToken(sp, token::Literal(
-                                                token::Str_(ecx.name_of(fmt.as_slice())),
-                                                None)),
-                                            ast::TtToken(sp, token::Comma),
-                                            ast::TtToken(sp, token::Interpolated(
-                                                token::NtExpr(ecx.expr_field_access(
-                                                    sp, ecx.expr_ident(sp, ecx.ident_of("args")),
-                                                    ecx.ident_of(varname.as_slice()))))),
-                                            ],
-                                        0)})),
-                            ecx.ident_of("as_slice"),
-                            vec![])));
+                            sp, ecx.expr_method_call(
+                                sp, value_expr,
+                                ecx.ident_of("to_string"), vec![]),
+                            ecx.ident_of("as_slice"), vec![])));
                 },
             }
         }
     }
 
     result.into_iter().map(|expr| ecx.stmt_expr(expr)).collect()
+}
+
+
+fn _convert_rust_expr_to_ast(ecx: &base::ExtCtxt, sp: Span, expr: &RustExpr) -> P<ast::Expr> {
+    match expr {
+        &RustExpr::Value(RustExprValue::Ident(ref ident)) =>
+            ecx.expr_field_access(
+                sp, ecx.expr_ident(sp, ecx.ident_of("args")),
+                ecx.ident_of(ident.as_slice())),
+        &RustExpr::Value(RustExprValue::StringLiteral(ref val)) =>
+            ecx.expr_str(sp, token::intern_and_get_ident(val.as_slice())),
+        &RustExpr::Value(RustExprValue::IntLiteral(ref val)) =>
+            ecx.expr_int(sp, *val as int),
+        &RustExpr::Value(RustExprValue::FloatLiteral(ref val)) =>
+            ecx.expr_lit(sp, ast::LitFloat(
+                token::intern_and_get_ident(val.to_string().as_slice()),
+                ast::TyF64)),
+        &RustExpr::Value(RustExprValue::BoolLiteral(ref val)) =>
+            ecx.expr_bool(sp, *val),
+        e => {
+            panic!("{} does not implemented yet", e);
+        }
+    }
 }

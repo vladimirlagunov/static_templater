@@ -1,4 +1,4 @@
-use template_ast::{TemplateAST, TemplateExpr};
+use template_ast::*;
 
 #[pub]
 template_parser -> TemplateAST
@@ -9,33 +9,26 @@ template_parser -> TemplateAST
 
 
 element -> TemplateExpr
-    = show_variable
+    = show
     / text
 
 
-show_variable -> TemplateExpr
+show -> TemplateExpr
     = show_variable_start
       " "*
-      var_name:identifier
-      var_fmt:_show_variable_fmt?
+      e:rust_expr
       " "*
       show_variable_end
 {
-    TemplateExpr::ShowVariable(
-        var_name,
-        var_fmt
-    )
+    TemplateExpr::Show(e)
 }
 
-_show_variable_fmt -> String
-    = ":" (!show_variable_end .)*
-{
-    match_str.slice_from(1).trim_right_chars(' ').into_string()
-}
 
 text -> TemplateExpr
     = (!show_variable_start !command_start .)+
-    { TemplateExpr::Text(match_str.into_string()) }
+{
+    TemplateExpr::Text(match_str.into_string())
+}
 
 
 show_variable_start = "{{"
@@ -43,6 +36,69 @@ show_variable_end = "}}"
 command_start = "{%"
 command_end = "%}"
 
-identifier -> String
+
+rust_expr -> RustExpr
+    = rust_expr__value__ident
+    / rust_expr__value__string_literal
+    / rust_expr__value__int_literal
+    / rust_expr__value__float_literal
+    / rust_expr__value__bool_literal
+    / rust_expr__get_attribute
+    / rust_expr__call
+
+
+rust_expr__value__ident -> RustExpr
+    = identifier
+{
+    RustExpr::Value(RustExprValue::Ident(match_str.to_string()))
+}
+
+
+rust_expr__value__string_literal -> RustExpr
+    = ["] ([^"] / "\\\"")* ["]
+{
+    RustExpr::Value(RustExprValue::StringLiteral(match_str.into_string()))
+}
+
+
+rust_expr__value__int_literal -> RustExpr
+    = [-+]? [0-9]+
+{
+    RustExpr::Value(RustExprValue::IntLiteral(match_str.parse().unwrap()))
+}
+
+
+rust_expr__value__float_literal -> RustExpr
+    = [-+]? [0-9]+ [.] [0-9]+ ([eE] [-+]? [0-9]+)?
+{
+    RustExpr::Value(RustExprValue::FloatLiteral(match_str.parse().unwrap()))
+}
+
+
+rust_expr__value__bool_literal -> RustExpr
+    = ("false" / "true")
+{
+    RustExpr::Value(RustExprValue::BoolLiteral(match_str == "true"))
+}
+
+
+rust_expr__get_attribute -> RustExpr
+    = source:rust_expr [.] attr:identifier
+{
+    RustExpr::GetAttribute(box source, attr.into_string())
+}
+
+
+rust_expr__call -> RustExpr
+    = callable:rust_expr [(] args:((rust_expr [,])* rust_expr?) [)]
+{
+    RustExpr::Call(box callable, args.iter().map(
+        |e: &RustExpr| box e.clone()).collect::<Vec<_>>())
+}
+
+
+identifier -> &'input str
     = [A-Za-z_][A-Za-z0-9_]*
-    { match_str.into_string() }
+{
+    match_str
+}
