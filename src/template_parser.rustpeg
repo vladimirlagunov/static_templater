@@ -37,64 +37,51 @@ command_start = "{%"
 command_end = "%}"
 
 
+// rust_expr -> RustExpr
+    // = rust_expr__value__ident
+    // / rust_expr__get_attribute
+    // / rust_expr__value__string_literal
+    // / rust_expr__value__int_literal
+    // / rust_expr__value__float_literal
+    // / rust_expr__value__bool_literal
+    // / rust_expr__call
+
+
 rust_expr -> RustExpr
-    = rust_expr__value__ident
-    / rust_expr__value__string_literal
-    / rust_expr__value__int_literal
-    / rust_expr__value__float_literal
-    / rust_expr__value__bool_literal
+    = rust_expr__value_ident
     / rust_expr__get_attribute
-    / rust_expr__call
 
 
-rust_expr__value__ident -> RustExpr
-    = identifier
+rust_expr__value_ident -> RustExpr
+    = identifier ![.(]
 {
     RustExpr::Value(RustExprValue::Ident(match_str.to_string()))
 }
 
 
-rust_expr__value__string_literal -> RustExpr
-    = ["] ([^"] / "\\\"")* ["]
-{
-    RustExpr::Value(RustExprValue::StringLiteral(match_str.into_string()))
-}
-
-
-rust_expr__value__int_literal -> RustExpr
-    = [-+]? [0-9]+
-{
-    RustExpr::Value(RustExprValue::IntLiteral(match_str.parse().unwrap()))
-}
-
-
-rust_expr__value__float_literal -> RustExpr
-    = [-+]? [0-9]+ [.] [0-9]+ ([eE] [-+]? [0-9]+)?
-{
-    RustExpr::Value(RustExprValue::FloatLiteral(match_str.parse().unwrap()))
-}
-
-
-rust_expr__value__bool_literal -> RustExpr
-    = ("false" / "true")
-{
-    RustExpr::Value(RustExprValue::BoolLiteral(match_str == "true"))
-}
-
-
 rust_expr__get_attribute -> RustExpr
-    = source:rust_expr [.] attr:identifier
+    = path:(identifier ++ ".")
 {
-    RustExpr::GetAttribute(box source, attr.into_string())
+    path.iter().skip(1).fold(
+        RustExpr::Value(RustExprValue::Ident(path.get(0).unwrap().into_string())),
+        |expr, attr| RustExpr::GetAttribute(box expr, attr.into_string()))
 }
 
 
-rust_expr__call -> RustExpr
-    = callable:rust_expr [(] args:((rust_expr [,])* rust_expr?) [)]
-{
-    RustExpr::Call(box callable, args.iter().map(
-        |e: &RustExpr| box e.clone()).collect::<Vec<_>>())
-}
+// rust_expr__value__ident -> RustExpr
+//     = identifier
+// {
+//     println!("Matched rust_expr__value__ident: {}", match_str);
+//     RustExpr::Value(RustExprValue::Ident(match_str.to_string()))
+// }
+
+
+// rust_expr__get_attribute -> RustExpr
+//     = source:rust_expr "." attr:identifier
+// {
+//     println!("Matched rust_expr__get_attribute: str: {}, source: {}, attr: {}", match_str, source, attr);
+//     RustExpr::GetAttribute(box source, attr.into_string())
+// }
 
 
 identifier -> &'input str
@@ -102,3 +89,39 @@ identifier -> &'input str
 {
     match_str
 }
+
+
+// rust_expr__value__string_literal -> RustExpr
+//     = ["] ([^"] / "\\\"")* ["]
+// {
+//     RustExpr::Value(RustExprValue::StringLiteral(match_str.into_string()))
+// }
+
+
+// rust_expr__value__int_literal -> RustExpr
+//     = [-+]? [0-9]+
+// {
+//     RustExpr::Value(RustExprValue::IntLiteral(match_str.parse().unwrap()))
+// }
+
+
+// rust_expr__value__float_literal -> RustExpr
+//     = [-+]? [0-9]+ "." [0-9]+ ([eE] [-+]? [0-9]+)?
+// {
+//     RustExpr::Value(RustExprValue::FloatLiteral(match_str.parse().unwrap()))
+// }
+
+
+// rust_expr__value__bool_literal -> RustExpr
+//     = ("false" / "true")
+// {
+//     RustExpr::Value(RustExprValue::BoolLiteral(match_str == "true"))
+// }
+
+
+// rust_expr__call -> RustExpr
+//     = callable:rust_expr [(] args:((rust_expr [,])* rust_expr?) [)]
+// {
+//     RustExpr::Call(box callable, args.iter().map(
+//         |e: &RustExpr| box e.clone()).collect::<Vec<_>>())
+// }
