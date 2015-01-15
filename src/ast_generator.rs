@@ -1,14 +1,12 @@
-use std::collections::{HashSet, HashMap};
-use std::collections::hash_map::Entry;
+use std::collections::HashSet;
 use std::path::Path;
 use std::io::fs::File;
 use std::os;
 
-use syntax::{ast, abi};
-use syntax::codemap::{Span, Spanned};
+use syntax::ast;
+use syntax::codemap::Span;
 use syntax::ext::base;
 use syntax::ext::build::AstBuilder;
-use syntax::owned_slice::OwnedSlice;
 use syntax::parse::token;
 use syntax::ptr::P;
 
@@ -16,15 +14,13 @@ pub use super::template_ast::{TemplateAST, TemplateExpr, RustExpr, RustExprValue
 pub use super::utils::to_camel_case;
 
 
-static TEMPLATE_FROM_FILE_USAGE: &'static str = "Usage: #[static_templater] mod fgsfds {...}";
-
-pub fn make_templater_module(ecx: &mut base::ExtCtxt, sp: Span, meta_item: &ast::MetaItem, item: P<ast::Item>) -> P<ast::Item> {
+pub fn make_templater_module(ecx: &mut base::ExtCtxt, sp: Span, _: &ast::MetaItem, item: P<ast::Item>) -> P<ast::Item> {
     use syntax::print::pprust;
 
     // Генерация AST
     match item.node {
         ast::ItemMod(ref module) => {
-            let options = match TemplaterOptions::from_module_node(ecx, sp.clone(), module) {
+            let options = match TemplaterOptions::from_module_node(sp.clone(), module) {
                 Ok(o) => o,
                 Err((sp, msg)) => {
                     ecx.span_err(sp, msg.as_slice());
@@ -33,8 +29,7 @@ pub fn make_templater_module(ecx: &mut base::ExtCtxt, sp: Span, meta_item: &ast:
             };
 
             let new_items = ast_gen::make(
-                module, ecx, sp, options.source.as_slice(),
-                &options.defined_types);
+                ecx, sp, options.source.as_slice(), &options.defined_types);
 
             match new_items {
                 Ok(new_items) => {
@@ -81,7 +76,7 @@ struct TemplaterOptions {
 
 
 impl TemplaterOptions {
-    pub fn from_module_node(ecx: &base::ExtCtxt, sp: Span, module: &ast::Mod)
+    pub fn from_module_node(sp: Span, module: &ast::Mod)
                             -> Result<Self, (Span, String)>
     {
         let mut result = TemplaterOptions {
@@ -189,7 +184,7 @@ mod ast_gen {
     use std::collections::hash_map::Entry;
 
     use syntax::{ast, abi};
-    use syntax::codemap::{Span, Spanned, DUMMY_SP};
+    use syntax::codemap::{Span, DUMMY_SP};
     use syntax::ext::base;
     use syntax::ext::build::AstBuilder;
     use syntax::owned_slice::OwnedSlice;
@@ -210,7 +205,6 @@ mod ast_gen {
     type KnownTypesSet = HashSet<ast::Ident>;
 
     pub fn make<'cx>(
-        module: &ast::Mod,
         ecx: &'cx mut base::ExtCtxt,
         sp: Span,
         source: &str,
@@ -234,7 +228,7 @@ mod ast_gen {
         let args_generics = ast::Generics {
             lifetimes: vec![],
             ty_params: OwnedSlice::from_vec(template_variables.iter().filter_map(
-                |&TemplateVariable {name: ref name, type_: ref type_, traits: ref traits}|
+                |&TemplateVariable {ref type_, ref traits, ..}|
                 match traits {
                     &None => None,
                     &Some(ref traits) => {
@@ -267,7 +261,7 @@ mod ast_gen {
             node: ast::ItemStruct(
                 P(ast::StructDef {
                     fields: template_variables.iter().map(
-                        |&TemplateVariable {name: ref name, type_: ref type_, ..}| ast::StructField {
+                        |&TemplateVariable {ref name, ref type_, ..}| ast::StructField {
                             span: sp,
                             node: ast::StructField_ {
                                 id: ast::DUMMY_NODE_ID,
@@ -313,8 +307,6 @@ mod ast_gen {
                             args_generics.ty_params.as_slice().iter().map(|ty_param| {
                                 ecx.ty_ident(sp, ty_param.ident.clone())
                             }).collect::<Vec<_>>(),
-                            // template_variables.iter().map(
-                            //     |&TemplateVariable {type_: ref type_, ..}| ecx.ty_path(type_.clone())).collect(),
                             vec![],
                             )))],
                     output: ast::Return(ecx.ty_path(ecx.path_ident(sp, ecx.ident_of("String")))),
@@ -327,20 +319,6 @@ mod ast_gen {
         }));
 
         Ok(items)
-    }
-
-    fn get_defined_types(ecx: &base::ExtCtxt, module: &ast::Mod) -> KnownTypesSet
-    {
-        let mut result = HashSet::new();
-        for item in module.items.iter() {
-            match item.deref() {
-                &ast::Item {ident: ref ident, node: ast::ItemTy(ref ty, ref generics), ..} => {
-                    result.insert(ident.clone());
-                },
-                _ => {},
-            };
-        }
-        result
     }
 
     pub fn make_template_variables<'cx, 'tree> (
@@ -394,7 +372,7 @@ mod ast_gen {
                            vec!["std", "string", "ToString"]);
             },
 
-            &RustExpr::GetAttribute(box ref obj_expr, ref attr_name) => {
+            &RustExpr::GetAttribute(box ref obj_expr, _) => {
                 _add_variables_from_rust_expr(ecx, variables, obj_expr);
             },
             
