@@ -16,57 +16,26 @@ pub use super::template_ast::{TemplateAST, TemplateExpr, RustExpr, RustExprValue
 pub use super::utils::to_camel_case;
 
 
-static TEMPLATE_FROM_FILE_USAGE: &'static str = "Usage: #[template_from_file(path=\"path/to/file.html\")] mod fgsfds {}";
+static TEMPLATE_FROM_FILE_USAGE: &'static str = "Usage: #[static_templater] mod fgsfds {...}";
 
-pub fn make_templater_module_from_file(ecx: &mut base::ExtCtxt, sp: Span, meta_item: &ast::MetaItem, item: P<ast::Item>) -> P<ast::Item> {
+pub fn make_templater_module(ecx: &mut base::ExtCtxt, sp: Span, meta_item: &ast::MetaItem, item: P<ast::Item>) -> P<ast::Item> {
     use syntax::print::pprust;
-
-    let file_relative_path: String = {
-        let mut file_relative_path = None;
-        match meta_item.node {
-            ast::MetaList(_, ref param_vec) => {
-                for param in param_vec.iter() {
-                    match param.node {
-                        ast::MetaNameValue(ref name, Spanned{node: ast::LitStr(ref interned_value, _), ..})
-                            if name.get() == "path" =>
-                        {
-                            file_relative_path = Some(interned_value.get())
-                        },
-                        _ => {
-                            ecx.span_err(sp, TEMPLATE_FROM_FILE_USAGE);
-                            return item;
-                        },
-                    }
-                }
-            },
-            _ => {
-                ecx.span_err(sp, TEMPLATE_FROM_FILE_USAGE);
-                return item;
-            },
-        }
-
-        if file_relative_path.is_none() {
-            ecx.span_err(sp, TEMPLATE_FROM_FILE_USAGE);
-            return item;
-        }
-
-        file_relative_path.unwrap().to_string()
-    };
-
-    let source = File::open(&Path::new(file_relative_path.clone())).and_then(
-        |mut f| f.read_to_string());
-    let source = match source {
-        Ok(source) => source,
-        Err(e) => {
-            ecx.span_err(sp, format!("unexpected error: {}", e).as_slice());
-            return item;
-        },
-    };
 
     // Генерация AST
     match item.node {
         ast::ItemMod(ref module) => {
-            let new_items = ast_gen::make(module, ecx, sp, source, file_relative_path);
+            let options = match TemplaterOptions::from_module_node(ecx, sp.clone(), module) {
+                Ok(o) => o,
+                Err((sp, msg)) => {
+                    ecx.span_err(sp, msg.as_slice());
+                    return item.clone();
+                }
+            };
+
+            let new_items = ast_gen::make(
+                module, ecx, sp, options.source.as_slice(),
+                &options.defined_types);
+
             match new_items {
                 Ok(new_items) => {
                     let mut module = module.clone();
@@ -105,6 +74,114 @@ pub fn make_templater_module_from_file(ecx: &mut base::ExtCtxt, sp: Span, meta_i
 }
 
 
+struct TemplaterOptions {
+    pub source: String,
+    pub defined_types: HashSet<String>,
+}
+
+
+impl TemplaterOptions {
+    pub fn from_module_node(ecx: &base::ExtCtxt, sp: Span, module: &ast::Mod)
+                            -> Result<Self, (Span, String)>
+    {
+        let mut result = TemplaterOptions {
+            source: "".to_string(),
+            defined_types: HashSet::new(),
+        };
+
+        {
+            let mut template_source = None;
+            let mut defined_types = &mut result.defined_types;
+
+            for item in module.items.iter() {
+                let &ast::Item {ref ident, ref node, ref span, ..} = item.deref();
+                match (token::get_ident(*ident).get(), node) {
+                    (typename, &ast::ItemTy(..)) => {
+                        defined_types.insert(typename.into_string());
+                    },
+
+                    ("SOURCE", &ast::ItemConst(_, ref expr)) => {
+                        if ! template_source.is_none() {
+                            return Err((sp, "Template source already specified.".into_string()));
+                        }
+                        match TemplaterOptions::_str_literal_value(expr.deref(), sp) {
+                            Ok(s) => {
+                                template_source = Some(s);
+                            },
+                            Err((sp, msg)) => {
+                                return Err((sp, msg.into_string()));
+                            }
+                        }
+                    },
+
+                    ("SOURCE", _) => {
+                        return Err((*span, "Expected const &'static str".into_string()));
+                    },
+
+                    ("SOURCE_FILE", &ast::ItemConst(_, ref expr)) => {
+                        if ! template_source.is_none() {
+                            return Err((sp, "Template source already specified.".into_string()));
+                        }
+                        match TemplaterOptions::_str_literal_value(expr.deref(), sp) {
+                            Ok(s) => {
+                                let s = File::open(&Path::new(s)).and_then(
+                                    |mut f| f.read_to_string());
+                                match s {
+                                    Ok(s) => {
+                                        template_source = Some(s)
+                                    },
+                                    Err(msg) => {
+                                        return Err((sp, format!("{}", msg)));
+                                    }
+                                }
+                            },
+                            Err((sp, msg)) => {
+                                return Err((sp, msg.into_string()));
+                            }
+                        }
+                    },
+
+                    ("SOURCE_FILE", _) => {
+                        return Err((*span, "Expected const &'static str".into_string()));
+                    },
+
+                    _ => {},
+                }
+            }
+
+            result.source = match template_source {
+                Some(r) => r,
+                None => {
+                    return Err((sp, "Define constant SOURCE or SOURCE_FILE".into_string()));
+                }
+            }
+        }
+
+        Ok(result)
+    }
+
+    fn _str_literal_value(expr: &ast::Expr, sp: Span)
+                          -> Result<String, (Span, &'static str)>
+    {
+        const EXPECTED_STR_LITERAL: &'static str = "Expected &'static str";
+
+        let spanned_literal =
+            if let ast::Expr {node: ast::ExprLit(ref l), ..} = *expr {
+                l
+            } else {
+                return Err((sp, EXPECTED_STR_LITERAL))
+            };
+        let sp = spanned_literal.span;
+        let interned_string =
+            if let ast::Lit_::LitStr(ref s, _) = spanned_literal.node {
+                s
+            } else {
+                return Err((sp, EXPECTED_STR_LITERAL))
+            };
+        Ok(interned_string.get().into_string())
+    }
+}
+
 
 
 mod ast_gen {
@@ -136,16 +213,18 @@ mod ast_gen {
         module: &ast::Mod,
         ecx: &'cx mut base::ExtCtxt,
         sp: Span,
-        source: String,
-        source_file: String)
+        source: &str,
+        defined_types: &HashSet<String>)
         -> Result<Vec<P<ast::Item>>, (Span, String)>
     {
-        let defined_types = get_defined_types(ecx, module);
+        let defined_types: KnownTypesSet =
+            defined_types.iter().map(
+                |s| ecx.ident_of(s.as_slice())).collect();
 
-        let template_tree = match template_parser(source.as_slice()) {
+        let template_tree = match template_parser(source) {
             Ok(x) => x,
             Err(e) => {
-                return Err((sp, format!("Syntax error in \"{}\": {}", source_file, e)));
+                return Err((sp, format!("Syntax error: {}", e)));
             }
         };
 

@@ -6,11 +6,13 @@
 
 extern crate time;
 
-#[templater_from_file(path="data/test.rs.html")]
+#[static_templater]
 mod example_templater {
     use time::Tm;
 
     type TimeType = Tm;
+
+    const SOURCE_FILE: &'static str = "data/test.rs.html";
 }
 
 

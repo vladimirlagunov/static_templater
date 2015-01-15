@@ -15,7 +15,7 @@ pub enum TemplateExpr {
 pub enum RustExpr {
     Value(RustExprValue),
     GetAttribute(Box<RustExpr>, String),
-    Call(Box<RustExpr>, Vec<Box<RustExpr>>),
+    GetItem(Box<RustExpr>, RustExprValue),
 }
 
 
