@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::path::Path;
 use std::io::fs::File;
 use std::os;
@@ -17,7 +17,6 @@ pub use super::utils::to_camel_case;
 pub fn make_templater_module(ecx: &mut base::ExtCtxt, sp: Span, _: &ast::MetaItem, item: P<ast::Item>) -> P<ast::Item> {
     use syntax::print::pprust;
 
-    // Генерация AST
     match item.node {
         ast::ItemMod(ref module) => {
             let options = match TemplaterOptions::from_module_node(sp.clone(), module) {
@@ -71,7 +70,7 @@ pub fn make_templater_module(ecx: &mut base::ExtCtxt, sp: Span, _: &ast::MetaIte
 
 struct TemplaterOptions {
     pub source: String,
-    pub defined_types: HashSet<String>,
+    pub defined_types: HashMap<ast::Ident, (P<ast::Ty>, ast::Generics)>,
 }
 
 
@@ -81,7 +80,7 @@ impl TemplaterOptions {
     {
         let mut result = TemplaterOptions {
             source: "".to_string(),
-            defined_types: HashSet::new(),
+            defined_types: HashMap::new(),
         };
 
         {
@@ -91,8 +90,8 @@ impl TemplaterOptions {
             for item in module.items.iter() {
                 let &ast::Item {ref ident, ref node, ref span, ..} = item.deref();
                 match (token::get_ident(*ident).get(), node) {
-                    (typename, &ast::ItemTy(..)) => {
-                        defined_types.insert(typename.into_string());
+                    (_, &ast::ItemTy(ref ty, ref generics)) => {
+                        defined_types.insert(ident.clone(), (ty.clone(), generics.clone()));
                     },
 
                     ("SOURCE", &ast::ItemConst(_, ref expr)) => {
@@ -196,10 +195,14 @@ mod ast_gen {
     use self::template_parser::template_parser;
     peg_file! template_parser("template_parser.rustpeg");
 
+    enum TemplateVariableType {
+        Type(P<ast::Ty>, ast::Generics),
+        Traits(Vec<ast::Path>),
+    }
+
     struct TemplateVariable {
         pub name: ast::Ident,
-        pub type_: ast::Path,
-        pub traits: Option<Vec<ast::Path>>,
+        pub type_: TemplateVariableType,
     }
 
     type KnownTypesSet = HashSet<ast::Ident>;
@@ -208,13 +211,9 @@ mod ast_gen {
         ecx: &'cx mut base::ExtCtxt,
         sp: Span,
         source: &str,
-        defined_types: &HashSet<String>)
+        defined_types: &HashMap<ast::Ident, (P<ast::Ty>, ast::Generics)>)
         -> Result<Vec<P<ast::Item>>, (Span, String)>
     {
-        let defined_types: KnownTypesSet =
-            defined_types.iter().map(
-                |s| ecx.ident_of(s.as_slice())).collect();
-
         let template_tree = match template_parser(source) {
             Ok(x) => x,
             Err(e) => {
@@ -227,25 +226,52 @@ mod ast_gen {
 
         let args_generics = ast::Generics {
             lifetimes: vec![],
-            ty_params: OwnedSlice::from_vec(template_variables.iter().filter_map(
-                |&TemplateVariable {ref type_, ref traits, ..}|
-                match traits {
-                    &None => None,
-                    &Some(ref traits) => {
-                        assert!(type_.segments.len() == 1);
-                        Some(ast::TyParam {
-                            ident: type_.segments.last().unwrap().identifier,
-                            id: ast::DUMMY_NODE_ID,
-                            bounds: OwnedSlice::from_vec(traits.iter().map(
-                                |x| {
-                                    ecx.typarambound(x.clone())
-                                }).collect()),
-                            unbound: None,
-                            default: None,
-                            span: sp,
-                        })
-                    },
-                }).collect()),
+            ty_params: OwnedSlice::from_vec({
+                let mut result = Vec::new();
+                for &TemplateVariable{ref name, ref type_, ..} in template_variables.iter() {
+                    match type_ {
+                        &TemplateVariableType::Type(_, ref generics) => {
+                            result.extend(generics.ty_params.iter().map(
+                                |typaram| {
+                                    let mut typaram = typaram.clone();
+                                    let mut name = to_camel_case(token::get_ident(name.clone()).get().into_string());
+                                    name.push_str("Type");
+                                    name.push_str(token::get_ident(typaram.ident).get());
+                                    name.push_str("Trait");
+                                    typaram.ident = ecx.ident_of(name.as_slice());
+
+                                    // let mut bounds: Vec<ast::TyParamBound> = typaram.bounds.into_vec();
+                                    // bounds.push(ecx.typarambound(ecx.path(sp, vec![
+                                    //     ecx.ident_of("std"), ecx.ident_of("fmt"), ecx.ident_of("Show")])));
+                                    // typaram.bounds = OwnedSlice::from_vec(bounds);
+
+                                    typaram
+                                }));
+                        },
+                        
+                        &TemplateVariableType::Traits(_) => {
+                            result.push(ast::TyParam {
+                                ident: {
+                                    let mut t = to_camel_case(token::get_ident(name.clone()).get());
+                                    t.push_str("Type");
+                                    ecx.ident_of(t.as_slice())
+                                },
+                                id: ast::DUMMY_NODE_ID,
+                                bounds: OwnedSlice::from_vec(vec![
+                                    ecx.typarambound(ecx.path(sp, vec![
+                                        ecx.ident_of("std"), 
+                                        ecx.ident_of("string"), 
+                                        ecx.ident_of("ToString")])),
+                                    ]),
+                                unbound: None,
+                                default: None,
+                                span: sp,
+                            });
+                        },
+                    }
+                }
+                result
+            }),
             where_clause: ast::WhereClause {
                 id: ast::DUMMY_NODE_ID,
                 predicates: vec![],
@@ -261,12 +287,35 @@ mod ast_gen {
             node: ast::ItemStruct(
                 P(ast::StructDef {
                     fields: template_variables.iter().map(
-                        |&TemplateVariable {ref name, ref type_, ..}| ast::StructField {
+                        |&TemplateVariable {ref name, ref type_, ..}|
+                        ast::StructField {
                             span: sp,
                             node: ast::StructField_ {
                                 id: ast::DUMMY_NODE_ID,
                                 kind: ast::NamedField(name.clone(), ast::Public),
-                                ty: ecx.ty(sp, ast::TyPath(type_.clone(), ast::DUMMY_NODE_ID)),
+                                ty: {
+                                    let mut t = to_camel_case(token::get_ident(name.clone()).get());
+                                    t.push_str("Type");
+                                    let t_ident = ecx.ident_of(t.as_slice());
+                                    match type_ {
+                                        &TemplateVariableType::Type(_, ref type_generics) =>
+                                            ecx.ty_path(ecx.path_all(
+                                                sp, false, 
+                                                vec![ecx.ident_of("self"), t_ident],
+                                                vec![],  // lifetimes
+                                                type_generics.ty_params.iter().map(
+                                                    |typaram| {
+                                                        let mut t = t.clone();
+                                                        t.push_str(token::get_ident(typaram.ident).get());
+                                                        t.push_str("Trait");
+                                                        ecx.ty_ident(sp, ecx.ident_of(t.as_slice()))
+                                                    }).collect(),
+                                                vec![], // bindings
+                                                )),
+                                        &TemplateVariableType::Traits(_) =>
+                                            ecx.ty_ident(sp, t_ident),
+                                    }
+                                },
                                 attrs: vec![],
                             },
                         }).collect(),
@@ -323,7 +372,7 @@ mod ast_gen {
 
     pub fn make_template_variables<'cx, 'tree> (
         ecx: &'cx mut base::ExtCtxt, exprs: &Vec<TemplateExpr>,
-        known_types: KnownTypesSet)
+        defined_types: &HashMap<ast::Ident, (P<ast::Ty>, ast::Generics)>)
         -> Vec<TemplateVariable>
     {
         let mut variables = HashMap::<ast::Ident, HashSet<ast::Path>>::new();
@@ -344,16 +393,14 @@ mod ast_gen {
                 t.push_str("Type");
                 ecx.ident_of(t.as_slice())
             };
-            let known_type = known_types.contains(&typename);
+            let defined_type_info = defined_types.get(&typename);
 
             result.push(TemplateVariable {
                 name: varname,
-                type_: if known_type {
-                    ecx.path(DUMMY_SP, vec![ecx.ident_of("self"), typename])
-                } else {
-                    ecx.path_ident(DUMMY_SP, typename)
+                type_: match defined_type_info {
+                    Some(&(ref ty, ref generics)) => TemplateVariableType::Type(ty.clone(), generics.clone()),
+                    None => TemplateVariableType::Traits(vartraits.into_iter().collect()),
                 },
-                traits: if known_type { None } else { Some(vartraits.into_iter().collect()) },
             });
         }
 
@@ -390,18 +437,6 @@ mod ast_gen {
         };
         traits.insert(ecx.path(DUMMY_SP, vartrait.iter().map(|s| ecx.ident_of(*s)).collect()));
     }
-
-    // fn _merge_traits(variables: &mut _Variables, new_variables: _Variables) {
-    //     for (varname, vartraits) in new_variables.into_iter() {
-    //         for vartrait in vartraits.into_iter() {
-    //             let mut traits = match variables.entry(varname) {
-    //                 Entry::Occupied(v) => v.into_mut(),
-    //                 Entry::Vacant(v) => v.set(HashSet::new()),
-    //             };
-    //             traits.insert(vartrait);
-    //         }
-    //     }
-    // }
 
     #[inline]
     fn _make_fn_block_statements<'cx>(ecx: &'cx mut base::ExtCtxt, sp: Span, tree: &TemplateAST) -> Vec<P<ast::Stmt>> {
