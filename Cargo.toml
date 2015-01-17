@@ -1,10 +1,8 @@
 # -*- conf -*-
 [package]
-
 name = "static_templater"
 version = "0.0.1"
-authors = ["lvo"]
-# build = "build.rs"
+authors = ["Vladimir Lagunov <lagunov.vladimir@gmail.com>"]
 
 
 [lib]
@@ -17,3 +15,4 @@ crate-type = ["dylib"]
 
 [build-dependencies.peg]
 git = "https://github.com/kevinmehall/rust-peg"
+rev = "409ced296b9dcf5d828b2caa736b9b28088cdb68"

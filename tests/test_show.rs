@@ -21,7 +21,7 @@ fn render<'r, T: Show>(v: T) -> String {
 #[test]
 fn test_string() {
     assert!(render("foobar").as_slice() == "Text foobar text");
-    assert!(render("foobar".into_string()).as_slice() == "Text foobar text");
+    assert!(render("foobar".to_string()).as_slice() == "Text foobar text");
 }
 
 

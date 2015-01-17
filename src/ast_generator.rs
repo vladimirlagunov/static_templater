@@ -96,25 +96,25 @@ impl TemplaterOptions {
 
                     ("SOURCE", &ast::ItemConst(_, ref expr)) => {
                         if ! template_source.is_none() {
-                            return Err((sp, "Template source already specified.".into_string()));
+                            return Err((sp, "Template source already specified.".to_string()));
                         }
                         match TemplaterOptions::_str_literal_value(expr.deref(), sp) {
                             Ok(s) => {
                                 template_source = Some(s);
                             },
                             Err((sp, msg)) => {
-                                return Err((sp, msg.into_string()));
+                                return Err((sp, msg.to_string()));
                             }
                         }
                     },
 
                     ("SOURCE", _) => {
-                        return Err((*span, "Expected const &'static str".into_string()));
+                        return Err((*span, "Expected const &'static str".to_string()));
                     },
 
                     ("SOURCE_FILE", &ast::ItemConst(_, ref expr)) => {
                         if ! template_source.is_none() {
-                            return Err((sp, "Template source already specified.".into_string()));
+                            return Err((sp, "Template source already specified.".to_string()));
                         }
                         match TemplaterOptions::_str_literal_value(expr.deref(), sp) {
                             Ok(s) => {
@@ -130,13 +130,13 @@ impl TemplaterOptions {
                                 }
                             },
                             Err((sp, msg)) => {
-                                return Err((sp, msg.into_string()));
+                                return Err((sp, msg.to_string()));
                             }
                         }
                     },
 
                     ("SOURCE_FILE", _) => {
-                        return Err((*span, "Expected const &'static str".into_string()));
+                        return Err((*span, "Expected const &'static str".to_string()));
                     },
 
                     _ => {},
@@ -146,7 +146,7 @@ impl TemplaterOptions {
             result.source = match template_source {
                 Some(r) => r,
                 None => {
-                    return Err((sp, "Define constant SOURCE or SOURCE_FILE".into_string()));
+                    return Err((sp, "Define constant SOURCE or SOURCE_FILE".to_string()));
                 }
             }
         }
@@ -172,7 +172,7 @@ impl TemplaterOptions {
             } else {
                 return Err((sp, EXPECTED_STR_LITERAL))
             };
-        Ok(interned_string.get().into_string())
+        Ok(interned_string.get().to_string())
     }
 }
 
@@ -234,7 +234,7 @@ mod ast_gen {
                             result.extend(generics.ty_params.iter().map(
                                 |typaram| {
                                     let mut typaram = typaram.clone();
-                                    let mut name = to_camel_case(token::get_ident(name.clone()).get().into_string());
+                                    let mut name = to_camel_case(token::get_ident(name.clone()).get().to_string());
                                     name.push_str("Type");
                                     name.push_str(token::get_ident(typaram.ident).get());
                                     name.push_str("Trait");

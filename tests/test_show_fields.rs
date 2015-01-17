@@ -3,21 +3,21 @@
 #[phase(link, plugin)] extern crate static_templater;
 
 
-use std::fmt::Show;
+use std::string::ToString;
 
 
-pub struct _Herp<Derp> {
+pub struct _Herp<Derp: ToString> {
     pub derp: Derp,
 }
 
 
-pub struct _Bar<Baz, Derp> {
+pub struct _Bar<Baz, Derp: ToString> {
     pub baz: Baz,
     pub herp: _Herp<Derp>,
 }
 
 
-pub struct _Example<Foo, Baz, Derp> {
+pub struct _Example<Foo: ToString, Baz: ToString, Derp: ToString> {
     pub foo: Foo,
     pub bar: _Bar<Baz, Derp>,
 }
@@ -25,15 +25,16 @@ pub struct _Example<Foo, Baz, Derp> {
 
 #[static_templater]
 mod templater {
-    use std::fmt::Show;
-    type ObjType<X: Show, Y: Show, Z: Show> = super::_Example<X, Y, Z>;
+    use std::string::ToString;
+
+    type ObjType<X: ToString, Y: ToString, Z: ToString> = super::_Example<X, Y, Z>;
 
     const SOURCE: &'static str =
         "{{ obj.foo }} --- {{ obj.bar.baz }} --- {{ obj.bar.herp.derp }}";
 }
 
 
-fn render<Foo: Show, Baz: Show, Derp: Show>(foo: Foo, baz: Baz, derp: Derp) -> String {
+fn render<Foo: ToString, Baz: ToString, Derp: ToString>(foo: Foo, baz: Baz, derp: Derp) -> String {
     let val = _Example {foo: foo, bar: _Bar {baz: baz, herp: _Herp {derp: derp}}};
     let args = templater::Args {obj: val};
     templater::render(args)
