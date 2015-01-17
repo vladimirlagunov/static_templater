@@ -1,25 +1,23 @@
-#[deriving(Show, Clone)]
 pub struct TemplateAST {
     pub children: Vec<TemplateExpr>
 }
 
 
-#[deriving(Show, Clone)]
 pub enum TemplateExpr {
     Text(String),
     Show(RustExpr),
 }
 
 
-#[deriving(Show, Clone)]
+#[derive(Show)]
 pub enum RustExpr {
     Value(RustExprValue),
     GetAttribute(Box<RustExpr>, String),
-    GetItem(Box<RustExpr>, RustExprValue),
 }
 
 
-#[deriving(Show, Clone)]
+#[allow(dead_code, unused_attributes)]
+#[derive(Show)]
 pub enum RustExprValue {
     Ident(String),
     StringLiteral(String),

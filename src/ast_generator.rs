@@ -423,7 +423,7 @@ mod ast_gen {
             },
             
             e => {
-                panic!("{:?} does not implemented yet", "TODO: e deriving Show");
+                panic!("{:?} does not implemented yet", e);
             },
         }
     }
@@ -499,10 +499,6 @@ mod ast_gen {
                     sp,
                     _convert_rust_expr_to_ast(ecx, sp, source_expr),
                     ecx.ident_of(attr.as_slice())),
-            
-            e => {
-                panic!("{} does not implemented yet", "TODO: e deriving Show");
-            }
         }
     }
 }

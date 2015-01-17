@@ -5,6 +5,7 @@
 extern crate time;
 
 #[static_templater]
+#[allow(dead_code)]
 mod example_templater {
     use time::Tm;
 
