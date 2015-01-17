@@ -27,7 +27,7 @@ show -> TemplateExpr
 text -> TemplateExpr
     = (!show_variable_start !command_start .)+
 {
-    TemplateExpr::Text(match_str.into_string())
+    TemplateExpr::Text(match_str.to_string())
 }
 
 
@@ -53,8 +53,8 @@ rust_expr__get_attribute -> RustExpr
     = path:(identifier ++ ".")
 {
     path.iter().skip(1).fold(
-        RustExpr::Value(RustExprValue::Ident(path.get(0).unwrap().into_string())),
-        |expr, attr| RustExpr::GetAttribute(box expr, attr.into_string()))
+        RustExpr::Value(RustExprValue::Ident(path.get(0).unwrap().to_string())),
+        |expr, attr| RustExpr::GetAttribute(box expr, attr.to_string()))
 }
 
 

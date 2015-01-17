@@ -6,12 +6,11 @@ pub fn to_camel_case<S: Str + Sized>(src: S) -> String {
             '_' => {
                 make_upper = true;
             },
-            x => {
-                let ch = x.to_ascii();
+            ch => {
                 if make_upper {
-                    result.push(ch.to_uppercase().as_char());
+                    result.push(ch.to_uppercase());
                 } else {
-                    result.push(ch.to_lowercase().as_char());
+                    result.push(ch.to_lowercase());
                 }
                 make_upper = false;
             }

@@ -1,8 +1,6 @@
-#![feature(phase)]
-#![feature(globs)]
-#[phase(link, plugin)] extern crate log;
-#[phase(link, plugin)] extern crate peg_syntax_ext;
-#[phase(link, plugin)] extern crate static_templater;
+#![feature(plugin)]
+#[plugin] extern crate peg_syntax_ext;
+#[plugin] extern crate static_templater;
 
 extern crate time;
 

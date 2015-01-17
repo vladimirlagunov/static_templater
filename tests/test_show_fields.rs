@@ -1,6 +1,5 @@
-#![feature(phase)]
-#![feature(macro_rules)]
-#[phase(link, plugin)] extern crate static_templater;
+#![feature(plugin)]
+#[plugin] extern crate static_templater;
 
 
 use std::string::ToString;

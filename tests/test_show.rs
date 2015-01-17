@@ -1,9 +1,5 @@
-#![feature(phase)]
-#![feature(macro_rules)]
-#[phase(link, plugin)] extern crate static_templater;
-
-
-use std::fmt::Show;
+#![feature(plugin)]
+#[plugin] extern crate static_templater;
 
 
 #[static_templater]
@@ -12,7 +8,7 @@ mod templater {
 }
 
 
-fn render<'r, T: Show>(v: T) -> String {
+fn render<'r, T: std::fmt::String>(v: T) -> String {
     let args = templater::Args::<T> {value: v};
     templater::render(args)
 }
@@ -60,7 +56,7 @@ fn test_custom() {
         bar: u64,
     }
 
-    impl Show for X {
+    impl std::fmt::String for X {
         fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
             write!(f, "foo={} and bar={}", self.foo, self.bar)
         }

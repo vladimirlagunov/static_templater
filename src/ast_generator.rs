@@ -88,7 +88,7 @@ impl TemplaterOptions {
             let mut defined_types = &mut result.defined_types;
 
             for item in module.items.iter() {
-                let &ast::Item {ref ident, ref node, ref span, ..} = item.deref();
+                let &ast::Item {ref ident, ref node, ref span, ..} = &**item;
                 match (token::get_ident(*ident).get(), node) {
                     (_, &ast::ItemTy(ref ty, ref generics)) => {
                         defined_types.insert(ident.clone(), (ty.clone(), generics.clone()));
@@ -98,7 +98,7 @@ impl TemplaterOptions {
                         if ! template_source.is_none() {
                             return Err((sp, "Template source already specified.".to_string()));
                         }
-                        match TemplaterOptions::_str_literal_value(expr.deref(), sp) {
+                        match TemplaterOptions::_str_literal_value(&**expr, sp) {
                             Ok(s) => {
                                 template_source = Some(s);
                             },
@@ -116,7 +116,7 @@ impl TemplaterOptions {
                         if ! template_source.is_none() {
                             return Err((sp, "Template source already specified.".to_string()));
                         }
-                        match TemplaterOptions::_str_literal_value(expr.deref(), sp) {
+                        match TemplaterOptions::_str_literal_value(&**expr, sp) {
                             Ok(s) => {
                                 let s = File::open(&Path::new(s)).and_then(
                                     |mut f| f.read_to_string());
@@ -263,7 +263,6 @@ mod ast_gen {
                                         ecx.ident_of("string"), 
                                         ecx.ident_of("ToString")])),
                                     ]),
-                                unbound: None,
                                 default: None,
                                 span: sp,
                             });
@@ -424,7 +423,7 @@ mod ast_gen {
             },
             
             e => {
-                panic!("{} does not implemented yet", e);
+                panic!("{:?} does not implemented yet", "TODO: e deriving Show");
             },
         }
     }
@@ -433,7 +432,7 @@ mod ast_gen {
                   varname: &str, vartrait: Vec<&str>) {
         let mut traits = match variables.entry(ecx.ident_of(varname)) {
             Entry::Occupied(v) => v.into_mut(),
-            Entry::Vacant(v) => v.set(HashSet::new()),
+            Entry::Vacant(v) => v.insert(HashSet::new()),
         };
         traits.insert(ecx.path(DUMMY_SP, vartrait.iter().map(|s| ecx.ident_of(*s)).collect()));
     }
@@ -443,13 +442,13 @@ mod ast_gen {
         let mut result: Vec<P<ast::Expr>> = Vec::new();
 
         {
-            let push_str_item = |item| ecx.expr_method_call(
+            let push_str_item = |&: item| ecx.expr_method_call(
                 sp,
                 ecx.expr_ident(sp, ecx.ident_of("result")),
                 ecx.ident_of("push_str"),
                 vec![item]);
 
-            let cooked_str = |s: String| ecx.expr_lit(
+            let cooked_str = |&: s: String| ecx.expr_lit(
                 sp, ast::LitStr(
                     token::intern_and_get_ident(s.as_slice()),
                     ast::CookedStr));
@@ -485,7 +484,9 @@ mod ast_gen {
             &RustExpr::Value(RustExprValue::StringLiteral(ref val)) =>
                 ecx.expr_str(sp, token::intern_and_get_ident(val.as_slice())),
             &RustExpr::Value(RustExprValue::IntLiteral(ref val)) =>
-                ecx.expr_int(sp, *val as int),
+                ecx.expr_lit(sp, ast::LitInt(
+                    *val as u64, 
+                    ast::SignedIntLit(ast::TyI64, ast::Sign::new(*val)))),
             &RustExpr::Value(RustExprValue::FloatLiteral(ref val)) =>
                 ecx.expr_lit(sp, ast::LitFloat(
                     token::intern_and_get_ident(val.to_string().as_slice()),
@@ -500,7 +501,7 @@ mod ast_gen {
                     ecx.ident_of(attr.as_slice())),
             
             e => {
-                panic!("{} does not implemented yet", e);
+                panic!("{} does not implemented yet", "TODO: e deriving Show");
             }
         }
     }

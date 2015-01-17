@@ -10,9 +10,13 @@ name = "static_templater"
 path = "src/lib.rs"
 test = true
 plugin = true
-crate-type = ["dylib"]
 
 
-[build-dependencies.peg]
+[dependencies]
+time = "*"
+
+
+[dependencies.peg]
 git = "https://github.com/kevinmehall/rust-peg"
-rev = "409ced296b9dcf5d828b2caa736b9b28088cdb68"
+rev = "dd12872b"
+plugin = true

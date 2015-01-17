@@ -1,13 +1,11 @@
 #![crate_name = "static_templater"]
 #![crate_type = "dylib"]
 #![crate_type = "rlib"]
-#![feature(globs)]
-#![feature(phase)]
-#![feature(plugin_registrar)]
-#[phase(link, plugin)] extern crate log;
-#[phase(link, plugin)] extern crate peg_syntax_ext;
-#[phase(link, plugin)] extern crate syntax;
-#[phase(link, plugin)] extern crate serialize;
+#![allow(unstable)]
+#![feature(plugin_registrar, plugin, box_syntax)]
+
+#[plugin] extern crate peg_syntax_ext;
+extern crate syntax;
 extern crate rustc;
 
 use syntax::ast::{MetaItem, Item};
@@ -37,7 +35,7 @@ pub fn plugin_registrar(reg: &mut Registry) {
 
 fn print_ast_item_modifier(_: &mut ExtCtxt, _: Span, _: &MetaItem, item: P<Item>) -> P<Item> {
     use syntax::print::pprust;
-    println!("****** DEBUG AST:\n{}", item);
+    println!("****** DEBUG AST:\n{:?}", item);
     println!("****** SERIALIZED BACK INTO CODE:\n{}", pprust::item_to_string(&*item));
     item.clone()
 }
