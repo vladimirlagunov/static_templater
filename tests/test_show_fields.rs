@@ -35,8 +35,7 @@ mod templater {
 
 fn render<Foo: ToString, Baz: ToString, Derp: ToString>(foo: Foo, baz: Baz, derp: Derp) -> String {
     let val = _Example {foo: foo, bar: _Bar {baz: baz, herp: _Herp {derp: derp}}};
-    let args = templater::Args {obj: val};
-    templater::render(args)
+    templater::Context {obj: val}.render()
 }
 
 

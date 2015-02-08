@@ -4,6 +4,7 @@
 
 extern crate time;
 
+
 #[static_templater]
 #[allow(dead_code)]
 mod example_templater {
@@ -24,8 +25,8 @@ fn main() {
         _ => "%username%".to_string(),
     };
 
-    print!("{}", example_templater::render(example_templater::Args {
+    print!("{}", example_templater::Context {
         user: username,
         time: now(),
-    }));
+    }.render());
 }

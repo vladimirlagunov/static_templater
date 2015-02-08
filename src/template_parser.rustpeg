@@ -37,24 +37,54 @@ command_start = "{%"
 command_end = "%}"
 
 
-rust_expr -> RustExpr
-    = rust_expr__value_ident
-    / rust_expr__get_attribute
-
-
-rust_expr__value_ident -> RustExpr
-    = identifier ![.([]
+rust_expr -> Box<RustExpr>
+    = exprs:(rust_expr__ident_with_item ++ ".")
 {
-    RustExpr::Value(RustExprValue::Ident(match_str.to_string()))
+    let start: Box<RustExpr> = exprs.get(0).unwrap().clone();
+    exprs.iter().skip(1).fold(
+        start, |expr: Box<RustExpr>, new_expr: &Box<RustExpr>| 
+            expr.concat_as_get_attribute(new_expr.clone()).ok().unwrap())
+}
+
+rust_expr__ident_with_item -> Box<RustExpr>
+    = ident:identifier getters:rust_expr__one_get_item*
+{
+    let mut result: Box<RustExpr> = Box::new(RustExpr::Value(
+        RustExprValue::Ident(ident.to_string())));
+    for value in getters.into_iter() {
+        result = Box::new(RustExpr::GetItem(result, value));
+    }
+    result
 }
 
 
-rust_expr__get_attribute -> RustExpr
-    = path:(identifier ++ ".")
+rust_expr__one_get_item -> RustExprValue
+    = "[" value:(rust_expr__value_ident 
+                / rust_expr__value_string
+                / rust_expr__value_int) "]"
 {
-    path.iter().skip(1).fold(
-        RustExpr::Value(RustExprValue::Ident(path.get(0).unwrap().to_string())),
-        |expr, attr| RustExpr::GetAttribute(box expr, attr.to_string()))
+    value
+}
+
+
+rust_expr__value_ident -> RustExprValue
+    = identifier ![.([]
+{
+    RustExprValue::Ident(match_str.to_string())
+}
+
+
+rust_expr__value_string -> RustExprValue
+    = ["] ([^"\\] / ([\\]["n\\]))* ["]
+{
+    RustExprValue::StringLiteral(match_str.slice(1, match_str.len() - 1).to_string())
+}
+
+
+rust_expr__value_int -> RustExprValue
+    = [-+]?[0-9]+
+{
+    RustExprValue::IntLiteral(match_str.parse().unwrap())
 }
 
 

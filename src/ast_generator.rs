@@ -1,12 +1,11 @@
 use std::collections::HashMap;
-use std::path::Path;
-use std::io::fs::File;
-use std::os;
+use std::old_path::Path;
+use std::old_io::fs::File;
+use std::env;
 
 use syntax::ast;
 use syntax::codemap::Span;
 use syntax::ext::base;
-use syntax::ext::build::AstBuilder;
 use syntax::parse::token;
 use syntax::ptr::P;
 
@@ -27,16 +26,15 @@ pub fn make_templater_module(ecx: &mut base::ExtCtxt, sp: Span, _: &ast::MetaIte
                 }
             };
 
+            let mut module = module.clone();
+            ast_gen::extend_view_items(ecx, sp, &mut module);
+
             let new_items = ast_gen::make(
                 ecx, sp, options.source.as_slice(), &options.defined_types);
 
             match new_items {
                 Ok(new_items) => {
-                    let mut module = module.clone();
                     module.items.extend(new_items.into_iter());
-                    module.view_items.push(
-                        ecx.view_use_simple(sp, ast::Inherited, ecx.path_ident(
-                            sp, ecx.ident_of("std"))));
 
                     let result_item = ast::Item {
                         ident: item.ident.clone(),
@@ -47,7 +45,7 @@ pub fn make_templater_module(ecx: &mut base::ExtCtxt, sp: Span, _: &ast::MetaIte
                         span: item.span.clone(),
                     };
 
-                    if !os::getenv("STATIC_TEMPLATER_DEBUG").is_none() {
+                    if !env::var("STATIC_TEMPLATER_DEBUG").is_none() {
                         ecx.parse_sess.span_diagnostic.span_help(
                             sp, pprust::item_to_string(&result_item).as_slice());
                     }
@@ -118,7 +116,7 @@ impl TemplaterOptions {
                         }
                         match TemplaterOptions::_str_literal_value(&**expr, sp) {
                             Ok(s) => {
-                                let s = File::open(&Path::new(s)).and_then(
+                                let s = File::open(&Path::new(s.as_slice())).and_then(
                                     |mut f| f.read_to_string());
                                 match s {
                                     Ok(s) => {
@@ -207,6 +205,14 @@ mod ast_gen {
 
     type KnownTypesSet = HashSet<ast::Ident>;
 
+    pub fn extend_view_items(ecx: &base::ExtCtxt, sp: Span, module: &mut ast::Mod) {
+        // TODO: check if already exists
+        for ident in ["std", "static_templater"].iter() {
+            module.items.insert(0, ecx.item_use_simple(
+                sp, ast::Inherited, ecx.path_ident(sp, ecx.ident_of(*ident))));
+        }
+    }
+
     pub fn make<'cx>(
         ecx: &'cx mut base::ExtCtxt,
         sp: Span,
@@ -225,7 +231,7 @@ mod ast_gen {
         let mut items = Vec::<P<ast::Item>>::new();
 
         let args_generics = ast::Generics {
-            lifetimes: vec![],
+            lifetimes: Vec::new(),
             ty_params: OwnedSlice::from_vec({
                 let mut result = Vec::new();
                 for &TemplateVariable{ref name, ref type_, ..} in template_variables.iter() {
@@ -249,7 +255,7 @@ mod ast_gen {
                                 }));
                         },
                         
-                        &TemplateVariableType::Traits(_) => {
+                        &TemplateVariableType::Traits(ref traits) => {
                             result.push(ast::TyParam {
                                 ident: {
                                     let mut t = to_camel_case(token::get_ident(name.clone()).get());
@@ -257,12 +263,8 @@ mod ast_gen {
                                     ecx.ident_of(t.as_slice())
                                 },
                                 id: ast::DUMMY_NODE_ID,
-                                bounds: OwnedSlice::from_vec(vec![
-                                    ecx.typarambound(ecx.path(sp, vec![
-                                        ecx.ident_of("std"), 
-                                        ecx.ident_of("string"), 
-                                        ecx.ident_of("ToString")])),
-                                    ]),
+                                bounds: OwnedSlice::from_vec(traits.iter().map(
+                                    |path| ecx.typarambound(path.clone())).collect()),
                                 default: None,
                                 span: sp,
                             });
@@ -273,12 +275,12 @@ mod ast_gen {
             }),
             where_clause: ast::WhereClause {
                 id: ast::DUMMY_NODE_ID,
-                predicates: vec![],
+                predicates: Vec::new(),
             },
         };
 
         items.push(P(ast::Item {
-            ident: ecx.ident_of("Args"),
+            ident: ecx.ident_of("Context"),
             span: sp,
             vis: ast::Public,
             id: ast::DUMMY_NODE_ID,
@@ -301,7 +303,7 @@ mod ast_gen {
                                             ecx.ty_path(ecx.path_all(
                                                 sp, false, 
                                                 vec![ecx.ident_of("self"), t_ident],
-                                                vec![],  // lifetimes
+                                                Vec::new(),  // lifetimes
                                                 type_generics.ty_params.iter().map(
                                                     |typaram| {
                                                         let mut t = t.clone();
@@ -309,13 +311,13 @@ mod ast_gen {
                                                         t.push_str("Trait");
                                                         ecx.ty_ident(sp, ecx.ident_of(t.as_slice()))
                                                     }).collect(),
-                                                vec![], // bindings
+                                                Vec::new(), // bindings
                                                 )),
                                         &TemplateVariableType::Traits(_) =>
                                             ecx.ty_ident(sp, t_ident),
                                     }
                                 },
-                                attrs: vec![],
+                                attrs: Vec::new(),
                             },
                         }).collect(),
                     ctor_id: None,
@@ -331,39 +333,64 @@ mod ast_gen {
             ecx.expr_call(
                 sp,
                 ecx.expr_path(ecx.path(sp, vec![ecx.ident_of("String"), ecx.ident_of("new")])),
-                vec![]))];
+                Vec::new()))];
         fn_block_statements.extend(_make_fn_block_statements(ecx, sp, &template_tree).into_iter());
 
         let fn_block = ecx.block(sp, fn_block_statements, Some(ecx.expr_ident(sp, ecx.ident_of("result"))));
 
         items.push(P(ast::Item {
             span: sp,
-            ident: ecx.ident_of("render"),
+            ident: ecx.ident_of("Context"),
             attrs: Vec::new(),
-            vis: ast::Public,
+            vis: ast::Inherited,
             id: ast::DUMMY_NODE_ID,
-            node: ast::ItemFn(
-                P(ast::FnDecl {
-                    inputs: vec![ecx.arg(
-                        sp,
-                        ecx.ident_of("args"),
-                        ecx.ty_path(ecx.path_all(
-                            sp,
-                            false,  // false is not global
-                            vec![ecx.ident_of("self"), ecx.ident_of("Args")],
-                            vec![],  // lifetimes
-                            args_generics.ty_params.as_slice().iter().map(|ty_param| {
-                                ecx.ty_ident(sp, ty_param.ident.clone())
-                            }).collect::<Vec<_>>(),
-                            vec![],
-                            )))],
-                    output: ast::Return(ecx.ty_path(ecx.path_ident(sp, ecx.ident_of("String")))),
-                    variadic: false,
-                }),
+            node: ast::ItemImpl(
                 ast::Unsafety::Normal,
-                abi::Abi::Rust,
-                args_generics,
-                fn_block)
+                ast::ImplPolarity::Positive,
+                args_generics.clone(),
+                None,  // no trait ref
+                ecx.ty_path(ecx.path_all(
+                    sp, 
+                    false, // not global
+                    vec![ecx.ident_of("Context")],
+                    Vec::new(),  // lifetimes
+                    args_generics.ty_params.iter().map(
+                        |&ast::TyParam {ref ident, ..}| ecx.ty_ident(sp, ident.clone())
+                            ).collect(),  // types
+                    vec![] // bindings
+                    )),
+                vec![
+                    ast::MethodImplItem(P(ast::Method {
+                        attrs: Vec::new(),
+                        id: ast::DUMMY_NODE_ID,
+                        span: sp,
+                        node: ast::MethDecl(
+                            ecx.ident_of("render"), 
+                            ast::Generics {
+                                lifetimes: Vec::new(), 
+                                ty_params: OwnedSlice::empty(),
+                                where_clause: ast::WhereClause {
+                                    id: ast::DUMMY_NODE_ID,
+                                    predicates: Vec::new(),
+                                },
+                            },
+                            abi::Rust,
+                            ast::ExplicitSelf {
+                                span: sp,
+                                node: ast::SelfRegion(None, ast::MutImmutable, ecx.ident_of("self")),
+                            },
+                            ast::Unsafety::Normal,
+                            P(ast::FnDecl {
+                                inputs: vec![ecx.arg(
+                                    sp, ecx.ident_of("self"),
+                                    ecx.ty_infer(sp))],
+                                output: ast::Return(ecx.ty_path(ecx.path_ident(sp, ecx.ident_of("String")))),
+                                variadic: false,
+                            }),
+                            fn_block,
+                            ast::Visibility::Public),
+                    }))
+                        ]),
         }));
 
         Ok(items)
@@ -380,7 +407,7 @@ mod ast_gen {
             match expr {
                 &TemplateExpr::Text(_) => {},
                 &TemplateExpr::Show(ref expr) =>
-                    _add_variables_from_rust_expr(ecx, &mut variables, expr),
+                    _add_variables_from_rust_expr(ecx, &mut variables, &**expr, true),
             };
         }
 
@@ -409,17 +436,36 @@ mod ast_gen {
     fn _add_variables_from_rust_expr(
         ecx: &mut base::ExtCtxt,
         variables: &mut HashMap<ast::Ident, HashSet<ast::Path>>,
-        expr: &RustExpr)
+        expr: &RustExpr, must_have_tostring: bool)
     {
         match expr {
             &RustExpr::Value(RustExprValue::Ident(ref ident)) =>
             {
-                _add_trait(ecx, variables, ident.as_slice(),
-                           vec!["std", "string", "ToString"]);
+                if must_have_tostring {
+                    _add_trait(ecx, variables, ident.as_slice(),
+                               vec!["std", "string", "ToString"]);
+                } else {
+                    _get_or_create_variable_traits(ecx, variables, ident.as_slice());
+                }
             },
 
             &RustExpr::GetAttribute(box ref obj_expr, _) => {
-                _add_variables_from_rust_expr(ecx, variables, obj_expr);
+                _add_variables_from_rust_expr(
+                    ecx, variables, obj_expr, must_have_tostring);
+            },
+
+            &RustExpr::GetItem(box ref obj_expr, ref key) => { 
+                if let &RustExpr::Value(RustExprValue::Ident(ref ident)) = obj_expr {
+                    _add_trait(ecx, variables, ident.as_slice(),
+                               vec!["static_templater", "types", "ItemGetter"]);
+                } else {
+                    _add_variables_from_rust_expr(
+                        ecx, variables, obj_expr, false);
+                }
+                if let &RustExprValue::Ident(ref ident) = key {
+                    _add_trait(ecx, variables, ident.as_slice(),
+                               vec!["std", "string", "ToString"]);
+                }
             },
             
             e => {
@@ -428,12 +474,19 @@ mod ast_gen {
         }
     }
 
-    fn _add_trait(ecx: &base::ExtCtxt, variables: &mut HashMap<ast::Ident, HashSet<ast::Path>>,
-                  varname: &str, vartrait: Vec<&str>) {
-        let mut traits = match variables.entry(ecx.ident_of(varname)) {
+    fn _get_or_create_variable_traits<'map>
+        (ecx: &base::ExtCtxt, variables: &'map mut HashMap<ast::Ident, HashSet<ast::Path>>,
+         varname: &str) -> &'map mut HashSet<ast::Path>
+    {
+        match variables.entry(ecx.ident_of(varname)) {
             Entry::Occupied(v) => v.into_mut(),
             Entry::Vacant(v) => v.insert(HashSet::new()),
-        };
+        }
+    }
+
+    fn _add_trait(ecx: &base::ExtCtxt, variables: &mut HashMap<ast::Ident, HashSet<ast::Path>>,
+                  varname: &str, vartrait: Vec<&str>) {
+        let mut traits = _get_or_create_variable_traits(ecx, variables, varname);
         traits.insert(ecx.path(DUMMY_SP, vartrait.iter().map(|s| ecx.ident_of(*s)).collect()));
     }
 
@@ -459,13 +512,13 @@ mod ast_gen {
                         result.push(push_str_item(cooked_str(text.clone())));
                     },
                     &TemplateExpr::Show(ref expr) => {
-                        let value_expr = _convert_rust_expr_to_ast(ecx, sp, expr);
+                        let value_expr = _convert_rust_expr_to_ast(ecx, sp, &**expr);
                         result.push(push_str_item(
                             ecx.expr_method_call(
                                 sp, ecx.expr_method_call(
                                     sp, value_expr,
-                                    ecx.ident_of("to_string"), vec![]),
-                                ecx.ident_of("as_slice"), vec![])));
+                                    ecx.ident_of("to_string"), Vec::new()),
+                                ecx.ident_of("as_slice"), Vec::new())));
                     },
                 }
             }
@@ -477,28 +530,42 @@ mod ast_gen {
 
     fn _convert_rust_expr_to_ast(ecx: &base::ExtCtxt, sp: Span, expr: &RustExpr) -> P<ast::Expr> {
         match expr {
-            &RustExpr::Value(RustExprValue::Ident(ref ident)) =>
-                ecx.expr_field_access(
-                    sp, ecx.expr_ident(sp, ecx.ident_of("args")),
-                    ecx.ident_of(ident.as_slice())),
-            &RustExpr::Value(RustExprValue::StringLiteral(ref val)) =>
-                ecx.expr_str(sp, token::intern_and_get_ident(val.as_slice())),
-            &RustExpr::Value(RustExprValue::IntLiteral(ref val)) =>
-                ecx.expr_lit(sp, ast::LitInt(
-                    *val as u64, 
-                    ast::SignedIntLit(ast::TyI64, ast::Sign::new(*val)))),
-            &RustExpr::Value(RustExprValue::FloatLiteral(ref val)) =>
-                ecx.expr_lit(sp, ast::LitFloat(
-                    token::intern_and_get_ident(val.to_string().as_slice()),
-                    ast::TyF64)),
-            &RustExpr::Value(RustExprValue::BoolLiteral(ref val)) =>
-                ecx.expr_bool(sp, *val),
+            &RustExpr::Value(ref val) =>
+                _convert_rust_expr_value_to_ast(ecx, sp, val),
 
             &RustExpr::GetAttribute(box ref source_expr, ref attr) =>
                 ecx.expr_field_access(
                     sp,
                     _convert_rust_expr_to_ast(ecx, sp, source_expr),
                     ecx.ident_of(attr.as_slice())),
+
+            &RustExpr::GetItem(box ref source_expr, ref key) =>
+                ecx.expr_method_call(
+                    sp, 
+                    _convert_rust_expr_to_ast(ecx, sp, source_expr), 
+                    ecx.ident_of("get_string"), 
+                    vec![_convert_rust_expr_value_to_ast(ecx, sp, key)]),
+        }
+    }
+
+    fn _convert_rust_expr_value_to_ast(ecx: &base::ExtCtxt, sp: Span, val: &RustExprValue) -> P<ast::Expr> {
+        match val {
+            &RustExprValue::Ident(ref ident) =>
+                ecx.expr_field_access(
+                    sp, ecx.expr_ident(sp, ecx.ident_of("self")),
+                    ecx.ident_of(ident.as_slice())),
+            &RustExprValue::StringLiteral(ref val) =>
+                ecx.expr_str(sp, token::intern_and_get_ident(val.as_slice())),
+            &RustExprValue::IntLiteral(ref val) =>
+                ecx.expr_lit(sp, ast::LitInt(
+                    *val as u64, 
+                    ast::SignedIntLit(ast::TyI64, ast::Sign::new(*val)))),
+            &RustExprValue::FloatLiteral(ref val) =>
+                ecx.expr_lit(sp, ast::LitFloat(
+                    token::intern_and_get_ident(val.to_string().as_slice()),
+                    ast::TyF64)),
+            &RustExprValue::BoolLiteral(ref val) =>
+                ecx.expr_bool(sp, *val),
         }
     }
 }

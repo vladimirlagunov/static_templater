@@ -6,6 +6,10 @@ pub fn to_camel_case<S: Str + Sized>(src: S) -> String {
             '_' => {
                 make_upper = true;
             },
+            ch if ch >= '0' && ch <= '9' => {
+                result.push(ch);
+                make_upper = true;
+            },
             ch => {
                 if make_upper {
                     result.push(ch.to_uppercase());
@@ -30,45 +34,6 @@ fn test_to_camel_case() {
 
     assert!(to_camel_case("AbCdEf") == "Abcdef");
     assert!(to_camel_case("AbC_dEf") == "AbcDef");
+
+    assert!(to_camel_case("str2int_type") == "Str2IntType");
 }
-
-// pub fn remove_extension<'a>(filename: &'a str) -> &'a str {
-//     match filename.rfind('.') {
-//         Some(index) => filename.slice_to(index),
-//         None => filename
-//     }
-// }
-
-
-// #[test]
-// fn test_remove_extension() {
-//     let a = remove_extension("foo.c");
-//     assert!(a == "foo");
-
-//     let b = remove_extension("fgsfds");
-//     assert!(b == "fgsfds");
-
-//     let c = remove_extension("a.b.c.d.e");
-//     assert!(c == "a.b.c.d");
-// }
-
-
-// pub fn basename<'a>(filename: &'a str) -> &'a str {
-//     match filename.rfind('/') {
-//         Some(index) => filename.slice_to(index),
-//         None => filename,
-//     }
-// }
-
-
-// #[test]
-// fn test_basename() {
-//     let a = basename("/foo");
-//     assert!(a == "foo");
-
-//     let b = basename("fgsfds");
-//     assert!(b == "fgsfds");
-
-//     let c = basename("a/b/c/d/e");
-//     assert!(c == "a/b/c/d");
-// }

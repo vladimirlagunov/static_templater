@@ -13,10 +13,12 @@ plugin = true
 
 
 [dependencies]
+peg = "0.1.5"
+gcc = "0.1.7"
 time = "*"
 
 
-[dependencies.peg]
-git = "https://github.com/kevinmehall/rust-peg"
-rev = "dd12872b"
-plugin = true
+# [dependencies.peg]
+# git = "https://github.com/kevinmehall/rust-peg"
+# rev = "dd12872b"
+# plugin = true
