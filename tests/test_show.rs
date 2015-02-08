@@ -9,8 +9,7 @@ mod templater {
 
 
 fn render<'r, T: std::fmt::String>(v: T) -> String {
-    let args = templater::Args::<T> {value: v};
-    templater::render(args)
+    templater::Context::<T> {value: v}.render()
 }
 
 

@@ -4,6 +4,7 @@
 
 extern crate time;
 
+
 #[static_templater]
 #[allow(dead_code)]
 mod example_templater {
@@ -11,7 +12,7 @@ mod example_templater {
 
     type TimeType = Tm;
 
-    const SOURCE_FILE: &'static str = "data/test.rs.html";
+    const SOURCE_FILE: &'static str = "../../data/test.rs.html";
 }
 
 

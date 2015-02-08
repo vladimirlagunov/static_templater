@@ -2,7 +2,7 @@
 #![crate_type = "dylib"]
 #![crate_type = "rlib"]
 #![allow(unstable)]
-#![feature(plugin_registrar, plugin, box_syntax)]
+#![feature(plugin_registrar, plugin, box_syntax, rustc_private, core, unicode, env, path, io)]
 
 #[plugin] extern crate peg_syntax_ext;
 extern crate syntax;
@@ -19,6 +19,7 @@ use rustc::plugin::registry::Registry;
 mod template_ast;
 mod utils;
 mod ast_generator;
+pub mod types;
 
 
 #[plugin_registrar]
